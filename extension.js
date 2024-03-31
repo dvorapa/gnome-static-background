@@ -1,52 +1,56 @@
+import Clutter from 'gi://Clutter';
+import GObject from 'gi://GObject';
+import Graphene from 'gi://Graphene';
+import St from 'gi://St';
 
-const { Clutter, GLib, GObject, Graphene, Meta, St } = imports.gi;
-
-const Background = imports.ui.background;
-const Main = imports.ui.main;
-const Overview = imports.ui.overview;
-const OverviewControls = imports.ui.overviewControls;
-const Util = imports.misc.util;
-const Workspace = imports.ui.workspace;
+import * as Background from 'resource:///org/gnome/shell/ui/background.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Overview from 'resource:///org/gnome/shell/ui/overview.js';
+import * as OverviewControls from 'resource:///org/gnome/shell/ui/overviewControls.js';
+import * as Util from 'resource:///org/gnome/shell/misc/util.js';
+import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
 
 var bgManagers = [];
 var savedWorkspaceProto, savedControlsProto;
 
-function enable() {
-	// Add static background
-	for (var monitor of Main.layoutManager.monitors) {
-		let bgManager = new Background.BackgroundManager({
-			monitorIndex: monitor.index,
-			container: Main.layoutManager.overviewGroup,
-			vignette: true,
-		});
-
-		bgManagers.push(bgManager);
-		
-		bgManager._fadeSignal = Main.overview._overview
-			._controls
-			._stateAdjustment
-			.connect('notify::value', (v) => {
-				bgManager.backgroundActor.content.vignette_sharpness = Util.lerp(0, 0.6, Math.min(v.value, 1));
-				bgManager.backgroundActor.content.brightness = Util.lerp(1, 0.75, Math.min(v.value, 1));
+export default class MyExtension {
+	enable() {
+		// Add static background
+		for (var monitor of Main.layoutManager.monitors) {
+			let bgManager = new Background.BackgroundManager({
+				monitorIndex: monitor.index,
+				container: Main.layoutManager.overviewGroup,
+				vignette: true,
 			});
+
+			bgManagers.push(bgManager);
+
+			bgManager._fadeSignal = Main.overview._overview
+				._controls
+				._stateAdjustment
+				.connect('notify::value', (v) => {
+					bgManager.backgroundActor.content.vignette_sharpness = Util.lerp(0, 0.6, Math.min(v.value, 1));
+					bgManager.backgroundActor.content.brightness = Util.lerp(1, 0.75, Math.min(v.value, 1));
+				});
+		}
+
+		// Remove scaling background
+		savedWorkspaceProto = overrideProto(Workspace.Workspace.prototype, WorkspaceOverride);
+
+		// Add animations
+		savedControlsProto = overrideProto(OverviewControls.ControlsManager.prototype, ControlsOverride);
 	}
 
-	// Remove scaling background
-	savedWorkspaceProto = overrideProto(Workspace.Workspace.prototype, WorkspaceOverride);
+	disable() {
+		for (const mgr of bgManagers) {
+			Main.overview._overview._controls._stateAdjustment.disconnect(mgr._fadeSignal);
+			mgr.destroy();
+		}
+		bgManagers = [];
 
-	// Add animations
-	savedControlsProto = overrideProto(OverviewControls.ControlsManager.prototype, ControlsOverride)
-}
-
-function disable() {
-	for (const mgr of bgManagers) {
-		Main.overview._overview._controls._stateAdjustment.disconnect(mgr._fadeSignal);
-		mgr.destroy();
+		overrideProto(OverviewControls.ControlsManager.prototype, savedControlsProto);
+		overrideProto(Workspace.Workspace.prototype, savedWorkspaceProto);
 	}
-	bgManagers = [];
-
-	overrideProto(OverviewControls.ControlsManager.prototype, savedControlsProto);
-	overrideProto(Workspace.Workspace.prototype, savedWorkspaceProto);
 }
 
 function animateOpenOverview() {
@@ -59,18 +63,18 @@ function animateOpenOverview() {
 		controls.dash.translation_y = controls.dash.height;
 		controls.dash.ease({ translation_y: 0, duration: Overview.ANIMATION_TIME });
 	}
-	
+
 	// Animate search
 	controls._searchEntry.opacity = 0;
-	controls._searchEntry.ease({ opacity: 255, duration: Overview.ANIMATION_TIME })
+	controls._searchEntry.ease({ opacity: 255, duration: Overview.ANIMATION_TIME });
 
 	// Animate workspace switcher
 	controls._thumbnailsBox._indicator.opacity = 0;
-	controls._thumbnailsBox._indicator.ease({ opacity: 255, duration: Overview.ANIMATION_TIME })
+	controls._thumbnailsBox._indicator.ease({ opacity: 255, duration: Overview.ANIMATION_TIME });
 	controls._thumbnailsBox._thumbnails.forEach(thumbnail => {
 		thumbnail.opacity = 0;
 		thumbnail.ease({ opacity: 255, duration: Overview.ANIMATION_TIME });
-	})
+	});
 }
 
 function animateCloseOverview() {
@@ -84,18 +88,18 @@ function animateCloseOverview() {
 	}
 
 	// Animate search
-	controls._searchEntry.ease({ opacity: 0, duration: Overview.ANIMATION_TIME })
+	controls._searchEntry.ease({ opacity: 0, duration: Overview.ANIMATION_TIME });
 
 	// Animate workspace switcher
-	controls._thumbnailsBox._indicator.ease({ opacity: 0, duration: Overview.ANIMATION_TIME })
+	controls._thumbnailsBox._indicator.ease({ opacity: 0, duration: Overview.ANIMATION_TIME });
 	controls._thumbnailsBox._thumbnails.forEach(thumbnail => {
 		thumbnail.ease({ opacity: 0, duration: Overview.ANIMATION_TIME });
-	})
+	});
 }
 
 // Hack to detect if Dash to Dock or a fork thereof is enabled
 function isDashToDock() {
-	global.log("indash", Object.keys(Main.overview.dash));
+	//console.log("indash", Object.keys(Main.overview.dash));
 	return '_position' in Main.overview.dash;
 }
 
@@ -106,7 +110,7 @@ function overrideProto(proto, overrides) {
 		if (symbol.startsWith('after_')) {
 			const actualSymbol = symbol.substr('after_'.length);
 			const fn = proto[actualSymbol];
-			const afterFn = overrides[symbol]
+			const afterFn = overrides[symbol];
 			proto[actualSymbol] = function() {
 				const args = Array.prototype.slice.call(arguments);
 				const res = fn.apply(this, args);
@@ -126,8 +130,8 @@ function overrideProto(proto, overrides) {
 	return backup;
 }
 
-WorkspaceOverride = {
-	_init: function (metaWorkspace, monitorIndex, overviewAdjustment) {
+var WorkspaceOverride = {
+	_init: function(metaWorkspace, monitorIndex, overviewAdjustment) {
 		St.Widget.prototype._init.call(this, {
 			style_class: 'window-picker',
 			pivot_point: new Graphene.Point({ x: 0.5, y: 0.5 }),
@@ -207,9 +211,9 @@ WorkspaceOverride = {
 		// DND requires this to be set
 		this._delegate = this;
 	},
-}
+};
 
-ControlsOverride = {
+var ControlsOverride = {
 	animateToOverview() {
 		animateOpenOverview();
 		savedControlsProto.animateToOverview.call(this, ...arguments);
@@ -218,4 +222,4 @@ ControlsOverride = {
 		savedControlsProto.animateFromOverview.call(this, ...arguments);
 		animateCloseOverview();
 	},
-}
+};
